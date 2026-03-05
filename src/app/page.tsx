@@ -75,7 +75,7 @@ export default function Home() {
       <div className="min-h-screen flex flex-col items-center justify-center bg-base gap-8 p-8">
         {/* Background visualization */}
         <div className="fixed inset-0 -z-10 opacity-30">
-          <Visualizer isPlaying={false} progress={0} trackUri={null} />
+          <Visualizer isPlaying={false} progress={0} trackUri={null} positionMs={0} accessToken={null} />
         </div>
 
         <div className="text-center">
@@ -161,6 +161,8 @@ export default function Home() {
                   : 0
               }
               trackUri={playbackState.currentTrack?.uri || null}
+              positionMs={playbackState.position}
+              accessToken={accessToken}
             />
           </div>
 

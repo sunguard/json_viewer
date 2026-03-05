@@ -282,3 +282,44 @@ export async function setVolume(
     { method: "PUT" }
   );
 }
+
+// --- Audio Analysis ---
+
+export interface AudioAnalysisBeat {
+  start: number;
+  duration: number;
+  confidence: number;
+}
+
+export interface AudioAnalysisSegment {
+  start: number;
+  duration: number;
+  loudness_start: number;
+  loudness_max: number;
+  loudness_max_time: number;
+  pitches: number[];
+  timbre: number[];
+}
+
+export interface AudioAnalysisSection {
+  start: number;
+  duration: number;
+  loudness: number;
+  tempo: number;
+  key: number;
+  mode: number;
+  time_signature: number;
+}
+
+export interface AudioAnalysis {
+  beats: AudioAnalysisBeat[];
+  segments: AudioAnalysisSegment[];
+  sections: AudioAnalysisSection[];
+}
+
+export async function getAudioAnalysis(
+  trackId: string,
+  token: string
+): Promise<AudioAnalysis> {
+  return spotifyFetch<AudioAnalysis>(`/audio-analysis/${trackId}`, token);
+}

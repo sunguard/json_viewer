@@ -198,44 +198,65 @@ export async function transferPlayback(
   });
 }
 
+async function activateDevice(deviceId: string, token: string): Promise<void> {
+  try {
+    await fetch(`${SPOTIFY_API_BASE}/me/player`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ device_ids: [deviceId], play: false }),
+    });
+  } catch {
+    // Best-effort activation — ignore errors
+  }
+}
+
+async function playWithRetry(
+  deviceId: string,
+  token: string,
+  body: object
+): Promise<void> {
+  const maxRetries = 3;
+  const delays = [500, 1000, 2000];
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const response = await fetch(
+      `${SPOTIFY_API_BASE}/me/player/play?device_id=${deviceId}`,
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      }
+    );
+
+    if (response.ok || response.status === 204) return;
+
+    if (response.status === 403 && attempt < maxRetries) {
+      // Activate the device and wait before retrying
+      await activateDevice(deviceId, token);
+      await new Promise((r) => setTimeout(r, delays[attempt]));
+      continue;
+    }
+
+    throw new Error(`Spotify API error: ${response.status}`);
+  }
+}
+
 export async function playPlaylist(
   playlistId: string,
   deviceId: string,
   token: string,
   offsetPosition: number = 0
 ): Promise<void> {
-  try {
-    await spotifyFetch<void>(
-      `/me/player/play?device_id=${deviceId}`,
-      token,
-      {
-        method: "PUT",
-        body: JSON.stringify({
-          context_uri: `spotify:playlist:${playlistId}`,
-          offset: { position: offsetPosition },
-        }),
-      }
-    );
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("403")) {
-      // Device not active yet — transfer playback first, then retry
-      await transferPlayback(deviceId, token);
-      await new Promise((r) => setTimeout(r, 300));
-      await spotifyFetch<void>(
-        `/me/player/play?device_id=${deviceId}`,
-        token,
-        {
-          method: "PUT",
-          body: JSON.stringify({
-            context_uri: `spotify:playlist:${playlistId}`,
-            offset: { position: offsetPosition },
-          }),
-        }
-      );
-    } else {
-      throw error;
-    }
-  }
+  await playWithRetry(deviceId, token, {
+    context_uri: `spotify:playlist:${playlistId}`,
+    offset: { position: offsetPosition },
+  });
 }
 
 export async function playTrackInContext(
@@ -244,37 +265,10 @@ export async function playTrackInContext(
   deviceId: string,
   token: string
 ): Promise<void> {
-  try {
-    await spotifyFetch<void>(
-      `/me/player/play?device_id=${deviceId}`,
-      token,
-      {
-        method: "PUT",
-        body: JSON.stringify({
-          context_uri: `spotify:playlist:${playlistId}`,
-          offset: { uri: trackUri },
-        }),
-      }
-    );
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("403")) {
-      await transferPlayback(deviceId, token);
-      await new Promise((r) => setTimeout(r, 300));
-      await spotifyFetch<void>(
-        `/me/player/play?device_id=${deviceId}`,
-        token,
-        {
-          method: "PUT",
-          body: JSON.stringify({
-            context_uri: `spotify:playlist:${playlistId}`,
-            offset: { uri: trackUri },
-          }),
-        }
-      );
-    } else {
-      throw error;
-    }
-  }
+  await playWithRetry(deviceId, token, {
+    context_uri: `spotify:playlist:${playlistId}`,
+    offset: { uri: trackUri },
+  });
 }
 
 export async function togglePlayback(

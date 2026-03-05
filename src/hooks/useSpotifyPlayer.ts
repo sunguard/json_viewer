@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { SpotifyTrack, PlaybackState } from "@/types/spotify";
+import { transferPlayback } from "@/lib/spotify";
 
 interface UseSpotifyPlayerProps {
   accessToken: string | null;
@@ -48,6 +49,10 @@ export function useSpotifyPlayer({ accessToken }: UseSpotifyPlayerProps) {
         setPlaybackState((prev) => ({ ...prev, deviceId: device_id }));
         setIsReady(true);
         setError(null);
+        // Proactively activate the device so it's ready for playback
+        if (accessToken) {
+          transferPlayback(device_id, accessToken).catch(() => {});
+        }
       });
 
       newPlayer.addListener("not_ready", () => {

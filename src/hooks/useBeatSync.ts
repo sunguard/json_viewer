@@ -1,12 +1,9 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   getAudioAnalysis,
   type AudioAnalysis,
-  type AudioAnalysisBeat,
-  type AudioAnalysisSegment,
-  type AudioAnalysisSection,
 } from "@/lib/spotify";
 
 export interface BeatSyncState {
@@ -14,6 +11,10 @@ export interface BeatSyncState {
   beatEnergy: number;
   /** 0-1 normalized loudness of current segment */
   loudness: number;
+  /** 0-1 bass energy from timbre[0] */
+  bass: number;
+  /** 0-1 treble energy from timbre high bands */
+  treble: number;
   /** Auto-detected BPM from current section */
   bpm: number;
   /** Whether analysis data is loaded */
@@ -52,6 +53,8 @@ export function useBeatSync(
   const stateRef = useRef<BeatSyncState>({
     beatEnergy: 0,
     loudness: 0,
+    bass: 0,
+    treble: 0,
     bpm: 120,
     hasAnalysis: false,
   });
@@ -80,7 +83,6 @@ export function useBeatSync(
         }
       })
       .catch(() => {
-        // Analysis not available for some tracks
         if (!cancelled) {
           setAnalysis(null);
           setHasAnalysis(false);
@@ -114,6 +116,24 @@ export function useBeatSync(
     }
     const loudnessRange = maxLoudness - minLoudness || 1;
 
+    // Precompute timbre ranges for bass/treble normalization
+    let minBass = Infinity, maxBass = -Infinity;
+    let minTreble = Infinity, maxTreble = -Infinity;
+    for (const seg of segments) {
+      if (seg.timbre && seg.timbre.length >= 12) {
+        // timbre[0] = overall loudness/bass energy
+        // timbre[1] = brightness, timbre[2+] = higher harmonics
+        const bassVal = seg.timbre[0];
+        const trebleVal = (seg.timbre[3] + seg.timbre[4] + seg.timbre[5]) / 3;
+        if (bassVal < minBass) minBass = bassVal;
+        if (bassVal > maxBass) maxBass = bassVal;
+        if (trebleVal < minTreble) minTreble = trebleVal;
+        if (trebleVal > maxTreble) maxTreble = trebleVal;
+      }
+    }
+    const bassRange = maxBass - minBass || 1;
+    const trebleRange = maxTreble - minTreble || 1;
+
     const tick = () => {
       const now = performance.now();
       const dt = (now - (lastUpdateRef.current || now)) / 1000;
@@ -128,25 +148,25 @@ export function useBeatSync(
       // Detect new beat
       if (beatIdx !== lastBeatIndexRef.current && beat) {
         const timeSinceBeat = timeSec - beat.start;
-        // Only trigger if we're within 100ms of the beat start
         if (timeSinceBeat < 0.1) {
           beatEnergyRef.current = 1.0;
         }
         lastBeatIndexRef.current = beatIdx;
       }
 
-      // Decay beat energy (fast attack, medium decay)
-      beatEnergyRef.current *= Math.pow(0.05, dt); // ~85% decay per frame at 60fps
+      // Decay beat energy
+      beatEnergyRef.current *= Math.pow(0.05, dt);
       if (beatEnergyRef.current < 0.01) beatEnergyRef.current = 0;
 
-      // Find current segment loudness
+      // Find current segment data
       let loudness = 0.5;
+      let bass = 0;
+      let treble = 0;
       if (segments.length) {
         const segIdx = binarySearch(segments, timeSec);
         const seg = segments[segIdx];
         if (seg) {
           const segTime = timeSec - seg.start;
-          // Interpolate loudness within segment
           const currentLoudness =
             segTime < seg.loudness_max_time
               ? seg.loudness_start +
@@ -157,6 +177,13 @@ export function useBeatSync(
             0,
             Math.min(1, (currentLoudness - minLoudness) / loudnessRange)
           );
+
+          // Extract bass and treble from timbre
+          if (seg.timbre && seg.timbre.length >= 12) {
+            bass = Math.max(0, Math.min(1, (seg.timbre[0] - minBass) / bassRange));
+            const trebleVal = (seg.timbre[3] + seg.timbre[4] + seg.timbre[5]) / 3;
+            treble = Math.max(0, Math.min(1, (trebleVal - minTreble) / trebleRange));
+          }
         }
       }
 
@@ -173,6 +200,8 @@ export function useBeatSync(
       const newState: BeatSyncState = {
         beatEnergy: beatEnergyRef.current,
         loudness,
+        bass,
+        treble,
         bpm,
         hasAnalysis: true,
       };
@@ -195,5 +224,5 @@ export function useBeatSync(
 
   return hasAnalysis
     ? state
-    : { beatEnergy: 0, loudness: 0.5, bpm: 120, hasAnalysis: false };
+    : { beatEnergy: 0, loudness: 0.5, bass: 0, treble: 0, bpm: 120, hasAnalysis: false };
 }
